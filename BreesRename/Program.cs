@@ -6,21 +6,24 @@ namespace BreesRename
 {
     public class Program
     {
+        private static readonly char[] InvalidChars = Path.GetInvalidFileNameChars();
         private bool debugMode;
+        private string filter;
         private string folder;
         private char[] replaceChars;
         private string replaceWith;
-        private static char[] invalidChars = Path.GetInvalidFileNameChars();
 
         /// <summary>
-        /// Builds the new name of the file. This assumes the filename has already been checked and does contain characters that need to be replaced.
+        ///     Builds the new name of the file. This assumes the filename has already been checked and does contain characters
+        ///     that need to be replaced.
         /// </summary>
         private string BuildNewFileName(string name)
         {
-            var newName = replaceChars.Aggregate(name, (current, c) => current.Replace(c.ToString(), replaceWith));
-            if (replaceChars.Contains('.'))
+            var newName = this.replaceChars.Aggregate(name,
+                (current, c) => current.Replace(c.ToString(), this.replaceWith));
+            if (this.replaceChars.Contains('.'))
             {
-                var lastIndex = newName.LastIndexOf(replaceWith);
+                var lastIndex = newName.LastIndexOf(this.replaceWith);
                 newName = newName.Substring(0, lastIndex) + "." + newName.Substring(lastIndex + 1);
             }
 
@@ -28,38 +31,39 @@ namespace BreesRename
         }
 
         /// <summary>
-        /// Checks to see if the file matches any characters that are to be replaced.
+        ///     Checks to see if the file matches any characters that are to be replaced.
         /// </summary>
         private bool FileMatches(string file)
         {
             var renameablePartOfFileName = Path.GetFileNameWithoutExtension(file);
             if (string.IsNullOrWhiteSpace(renameablePartOfFileName)) return false;
-            return replaceChars.Any(renameablePartOfFileName.Contains);
+            return this.replaceChars.Any(renameablePartOfFileName.Contains);
         }
 
         /// <summary>
-        /// Outputs the arguments passed to this application.
+        ///     Outputs the arguments passed to this application.
         /// </summary>
         private void OutputArguments()
         {
-            Console.WriteLine("Debug mode active - no files will be modified");
-            if (replaceChars != null)
+            if (this.debugMode) Console.WriteLine("Debug mode active - no files will be modified");
+
+            if (this.replaceChars != null)
             {
                 Console.WriteLine("Replace character mode active");
                 Console.Write("    All the following characters will be replace: ");
-                foreach (var replaceChar in replaceChars)
+                foreach (var replaceChar in this.replaceChars)
                 {
                     Console.Write(replaceChar + " ");
                 }
                 Console.WriteLine();
                 Console.WriteLine("    They will be replaced with: " +
-                                  (replaceWith.Length == 0 ? "<Empty>" : replaceWith));
+                                  (this.replaceWith.Length == 0 ? "<Empty>" : this.replaceWith));
                 Console.WriteLine();
             }
         }
 
         /// <summary>
-        /// Parses the arguments provided with the commandline.
+        ///     Parses the arguments provided with the commandline.
         /// </summary>
         private bool ParseArguments(string[] args)
         {
@@ -87,6 +91,7 @@ namespace BreesRename
                 }
             }
 
+            if (string.IsNullOrWhiteSpace(this.filter)) this.filter = "*.*";
             return true;
         }
 
@@ -101,14 +106,15 @@ namespace BreesRename
             switch (kvp[0])
             {
                 case "/r":
-                    replaceChars = kvp[1].ToCharArray();
-                    replaceWith = string.Empty;
+                    this.replaceChars = kvp[1].ToCharArray();
+                    this.replaceWith = string.Empty;
                     break;
                 case "/rw":
-                    replaceWith = kvp[1];
-                    if (invalidChars.Any(c => replaceWith.Contains(c)))
+                    this.replaceWith = kvp[1];
+                    if (InvalidChars.Any(c => this.replaceWith.Contains(c)))
                     {
-                        ThrowError(string.Format("'{0}' is an invalid character and cannot be part of a filename.", replaceWith));
+                        ThrowError(string.Format("'{0}' is an invalid character and cannot be part of a filename.",
+                            this.replaceWith));
                         return false;
                     }
 
@@ -122,34 +128,50 @@ namespace BreesRename
             switch (arg)
             {
                 case "/d":
-                    debugMode = true;
+                    this.debugMode = true;
                     break;
             }
         }
 
         private bool ParseTargetFolder(string[] args)
         {
-            folder = args[0];
-            if (!Directory.Exists(folder))
+            this.folder = args[0];
+            if (!Directory.Exists(this.folder))
             {
-                ThrowError("Folder does not exist.");
+                var index = this.folder.LastIndexOf('\\');
+                if (index > 0)
+                {
+                    this.filter = this.folder.Substring(index + 1);
+                    this.folder = this.folder.Replace(this.filter, string.Empty);
+                    if (!Directory.Exists(this.folder))
+                    {
+                        ThrowError("Folder does not exist: " + this.folder);
+                        return false;
+                    }
+                }
+                else
+                {
+                    ThrowError("Folder does not exist: " + this.folder);
+                    return false;
+                }
+            }
+
+            if (File.Exists(this.folder))
+            {
+                ThrowError("The folder specified seems to be a file. It should be a folder. " + this.folder);
                 return false;
             }
 
-            if (File.Exists(folder))
-            {
-                ThrowError("The folder specified seems to be a file. It should be a folder.");
-                return false;
-            }
             return true;
         }
 
         /// <summary>
-        /// Renames the file by replace characters in the <see cref="replaceChars"/> array with the <see cref="replaceWith"/> string.
+        ///     Renames the file by replace characters in the <see cref="replaceChars" /> array with the <see cref="replaceWith" />
+        ///     string.
         /// </summary>
         private void ReplaceCharsInFileName()
         {
-            foreach (var file in Directory.GetFiles(folder))
+            foreach (var file in Directory.GetFiles(this.folder, this.filter))
             {
                 if (!FileMatches(file))
                 {
@@ -158,14 +180,14 @@ namespace BreesRename
 
                 var fileInfo = new FileInfo(file);
                 var newName = BuildNewFileName(fileInfo.Name);
-                if (debugMode)
+                if (this.debugMode)
                 {
-                    Console.WriteLine("{0} --> {1}", file, Path.Combine(folder, newName));
+                    Console.WriteLine("{0} --> {1}", file, Path.Combine(this.folder, newName));
                 }
                 else
                 {
                     Console.WriteLine("{0} --> {1}", file, newName);
-                    fileInfo.MoveTo(Path.Combine(folder, newName));
+                    fileInfo.MoveTo(Path.Combine(this.folder, newName));
                 }
             }
         }
@@ -178,18 +200,18 @@ namespace BreesRename
                 return;
             }
 
-            if (debugMode)
+            if (this.debugMode)
             {
                 OutputArguments();
             }
 
-            if (replaceChars != null)
+            if (this.replaceChars != null)
             {
                 ReplaceCharsInFileName();
             }
 
             Console.WriteLine("Finished.");
-            if (debugMode)
+            if (this.debugMode)
             {
                 Console.WriteLine("DEBUG MODE IS ACTIVE - NO FILE WAS MODIFIED.");
             }
