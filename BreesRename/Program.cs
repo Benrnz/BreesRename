@@ -1,34 +1,23 @@
 ﻿using System;
 using System.IO;
 using System.Linq;
+using System.Text;
+using System.Text.RegularExpressions;
 
 namespace BreesRename
 {
     public class Program
     {
         private static readonly char[] InvalidChars = Path.GetInvalidFileNameChars();
+        private const string Title = "Brees Bulk Rename Utility 2015.";
+        private StringBuilder errors = new StringBuilder();
         private bool debugMode;
         private string filter;
         private string folder;
         private char[] replaceChars;
         private string replaceWith;
-
-        /// <summary>
-        ///     Builds the new name of the file. This assumes the filename has already been checked and does contain characters
-        ///     that need to be replaced.
-        /// </summary>
-        private string BuildNewFileName(string name)
-        {
-            var newName = this.replaceChars.Aggregate(name,
-                (current, c) => current.Replace(c.ToString(), this.replaceWith));
-            if (this.replaceChars.Contains('.'))
-            {
-                var lastIndex = newName.LastIndexOf(this.replaceWith);
-                newName = newName.Substring(0, lastIndex) + "." + newName.Substring(lastIndex + 1);
-            }
-
-            return newName;
-        }
+        private Regex truncateAtRegex;
+        private bool quietMode;
 
         /// <summary>
         ///     Checks to see if the file matches any characters that are to be replaced.
@@ -45,6 +34,7 @@ namespace BreesRename
         /// </summary>
         private void OutputArguments()
         {
+            if (this.quietMode) return;
             if (this.debugMode) Console.WriteLine("Debug mode active - no files will be modified");
 
             if (this.replaceChars != null)
@@ -60,6 +50,13 @@ namespace BreesRename
                                   (this.replaceWith.Length == 0 ? "<Empty>" : this.replaceWith));
                 Console.WriteLine();
             }
+
+            if (this.truncateAtRegex != null)
+            {
+                Console.WriteLine("Truncate mode is active");
+                Console.WriteLine("    The following regex will be used to match and truncate after the match.");
+                Console.WriteLine("    " + this.truncateAtRegex.ToString());
+            }
         }
 
         /// <summary>
@@ -69,7 +66,7 @@ namespace BreesRename
         {
             if (args.Length == 0)
             {
-                ThrowError("Not enough arguments passed.");
+                SetError("Not enough arguments passed.");
                 return false;
             }
 
@@ -99,7 +96,7 @@ namespace BreesRename
         {
             if (kvp.Length != 2)
             {
-                ThrowError("Incorrect parameter: " + arg);
+                SetError("Incorrect parameter: " + arg);
                 return false;
             }
 
@@ -113,11 +110,14 @@ namespace BreesRename
                     this.replaceWith = kvp[1];
                     if (InvalidChars.Any(c => this.replaceWith.Contains(c)))
                     {
-                        ThrowError(string.Format("'{0}' is an invalid character and cannot be part of a filename.",
+                        SetError(string.Format("'{0}' is an invalid character and cannot be part of a filename.",
                             this.replaceWith));
                         return false;
                     }
 
+                    break;
+                case "/t":
+                    this.truncateAtRegex = new Regex(kvp[1], RegexOptions.Singleline);
                     break;
             }
             return true;
@@ -129,6 +129,9 @@ namespace BreesRename
             {
                 case "/d":
                     this.debugMode = true;
+                    break;
+                case "/q":
+                    this.quietMode = true;
                     break;
             }
         }
@@ -145,20 +148,20 @@ namespace BreesRename
                     this.folder = this.folder.Replace(this.filter, string.Empty);
                     if (!Directory.Exists(this.folder))
                     {
-                        ThrowError("Folder does not exist: " + this.folder);
+                        SetError("Folder does not exist: " + this.folder);
                         return false;
                     }
                 }
                 else
                 {
-                    ThrowError("Folder does not exist: " + this.folder);
+                    SetError("Folder does not exist: " + this.folder);
                     return false;
                 }
             }
 
             if (File.Exists(this.folder))
             {
-                ThrowError("The folder specified seems to be a file. It should be a folder. " + this.folder);
+                SetError("The folder specified seems to be a file. It should be a folder. " + this.folder);
                 return false;
             }
 
@@ -169,57 +172,95 @@ namespace BreesRename
         ///     Renames the file by replace characters in the <see cref="replaceChars" /> array with the <see cref="replaceWith" />
         ///     string.
         /// </summary>
-        private void ReplaceCharsInFileName()
+        private void ReplaceCharsInFileName(string fileName)
         {
-            foreach (var file in Directory.GetFiles(this.folder, this.filter))
+            if (!FileMatches(fileName))
             {
-                if (!FileMatches(file))
-                {
-                    continue;
-                }
+                return;
+            }
 
-                var fileInfo = new FileInfo(file);
-                var newName = BuildNewFileName(fileInfo.Name);
-                if (this.debugMode)
-                {
-                    Console.WriteLine("{0} --> {1}", file, Path.Combine(this.folder, newName));
-                }
-                else
-                {
-                    Console.WriteLine("{0} --> {1}", file, newName);
-                    fileInfo.MoveTo(Path.Combine(this.folder, newName));
-                }
+            var newName = this.replaceChars.Aggregate(fileName, (current, c) => current.Replace(c.ToString(), this.replaceWith));
+            if (this.replaceChars.Contains('.'))
+            {
+                var lastIndex = newName.LastIndexOf(this.replaceWith);
+                newName = newName.Substring(0, lastIndex) + "." + newName.Substring(lastIndex + 1);
+            }
+
+            RenameFile(fileName, newName);
+        }
+
+        private void RenameFile(string oldName, string newName)
+        {
+            var fileInfo = new FileInfo(oldName);
+            if (!fileInfo.Exists) return;
+            if (this.debugMode)
+            {
+                Console.WriteLine("{0} --> {1}", fileInfo.FullName, Path.Combine(this.folder, newName));
+            }
+            else
+            {
+                Console.WriteLine("{0} --> {1}", fileInfo.FullName, newName);
+                fileInfo.MoveTo(Path.Combine(this.folder, newName));
             }
         }
 
         private void Run(string[] args)
         {
-            Console.WriteLine("Brees Bulk Rename Utility 2015.");
-            if (!ParseArguments(args))
+            var parseSuccess = ParseArguments(args);
+            if (!parseSuccess)
             {
+                Console.WriteLine(Title);
+                Console.WriteLine(this.errors);
                 return;
             }
 
-            if (this.debugMode)
+            OutputArguments();
+
+            foreach (var file in Directory.GetFiles(this.folder, this.filter))
             {
-                OutputArguments();
+                if (this.truncateAtRegex != null)
+                {
+                    TruncateFileNameAtRegex(file);
+                }
+
+                if (this.replaceChars != null)
+                {
+                    ReplaceCharsInFileName(file);
+                }
             }
 
-            if (this.replaceChars != null)
+            if (this.errors.Length > 0)
             {
-                ReplaceCharsInFileName();
+                Console.WriteLine(this.errors);
             }
 
-            Console.WriteLine("Finished.");
-            if (this.debugMode)
+            if (!this.quietMode)
             {
-                Console.WriteLine("DEBUG MODE IS ACTIVE - NO FILE WAS MODIFIED.");
+                Console.WriteLine("Finished.");
+                if (this.debugMode)
+                {
+                    Console.WriteLine("DEBUG MODE IS ACTIVE - NO FILE WAS MODIFIED.");
+                }
             }
         }
 
-        private void ThrowError(string s)
+        /// <summary>
+        /// Truncates the file name at the matched regex.
+        /// </summary>
+        private void TruncateFileNameAtRegex(string fileName)
         {
-            Console.WriteLine(s);
+            var match = this.truncateAtRegex.Match(fileName);
+            if (match.Success)
+            {
+                var index = match.Index + match.Length;
+                var newName = fileName.Substring(0, index) + Path.GetExtension(fileName);
+                if (newName != fileName) RenameFile(fileName, newName);
+            }
+        }
+
+        private void SetError(string s)
+        {
+            this.errors.AppendLine(s);
         }
 
         public static void Main(string[] args)
