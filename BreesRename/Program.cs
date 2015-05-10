@@ -192,7 +192,14 @@ namespace BreesRename
         private void RenameFile(string oldName, string newName)
         {
             var fileInfo = new FileInfo(oldName);
-            if (!fileInfo.Exists) return;
+            if (!fileInfo.Exists) return;  //Unexpected error, it should have been checked previously.
+
+            if (File.Exists(newName))
+            {
+                SetError("Unable to rename '{0}' proposed new name '{1}' already exists.", Path.GetFileName(oldName), Path.GetFileName(newName));
+                return;
+            }
+
             if (this.debugMode)
             {
                 Console.WriteLine("{0} --> {1}", fileInfo.FullName, Path.Combine(this.folder, newName));
@@ -263,6 +270,11 @@ namespace BreesRename
             this.errors.AppendLine(s);
         }
 
+        private void SetError(string s, params object[] args)
+        {
+            this.errors.AppendLine(string.Format(s, args));
+        }
+        
         public static void Main(string[] args)
         {
             new Program().Run(args);
