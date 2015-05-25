@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -8,16 +10,18 @@ namespace BreesRename
 {
     public class Program
     {
-        private static readonly char[] InvalidChars = Path.GetInvalidFileNameChars();
         private const string Title = "Brees Bulk Rename Utility 2015.";
-        private StringBuilder errors = new StringBuilder();
+        private static readonly char[] InvalidChars = Path.GetInvalidFileNameChars();
+        private readonly StringBuilder errors = new StringBuilder();
+        private readonly Regex tvShowRegex = new Regex(@"^[Ss](\d{2})[Ee](\d{2})(.*)");
         private bool debugMode;
         private string filter;
         private string folder;
+        private bool properCase;
+        private bool quietMode;
         private char[] replaceChars;
         private string replaceWith;
         private Regex truncateAtRegex;
-        private bool quietMode;
 
         /// <summary>
         ///     Checks to see if the file matches any characters that are to be replaced.
@@ -55,7 +59,12 @@ namespace BreesRename
             {
                 Console.WriteLine("Truncate mode is active");
                 Console.WriteLine("    The following regex will be used to match and truncate after the match.");
-                Console.WriteLine("    " + this.truncateAtRegex.ToString());
+                Console.WriteLine("    " + this.truncateAtRegex);
+            }
+
+            if (this.properCase)
+            {
+                Console.WriteLine("Proper Case mode is active. This applies only to space and . seperated words.");
             }
         }
 
@@ -133,6 +142,9 @@ namespace BreesRename
                 case "/q":
                     this.quietMode = true;
                     break;
+                case "/p":
+                    this.properCase = true;
+                    break;
             }
         }
 
@@ -168,35 +180,52 @@ namespace BreesRename
             return true;
         }
 
-        /// <summary>
-        ///     Renames the file by replace characters in the <see cref="replaceChars" /> array with the <see cref="replaceWith" />
-        ///     string.
-        /// </summary>
-        private void ReplaceCharsInFileName(string fileName)
+        private void ProperCaseWordsInFileName(string file)
         {
-            if (!FileMatches(fileName))
+            if (!this.properCase) return;
+            var fileName = Path.GetFileName(file);
+            var folderName = Path.GetDirectoryName(file);
+            var extension = Path.GetExtension(file);
+            Debug.Assert(!string.IsNullOrWhiteSpace(folderName));
+            Debug.Assert(!string.IsNullOrWhiteSpace(fileName));
+            Debug.Assert(!string.IsNullOrWhiteSpace(extension));
+
+            extension = extension.Replace(".", string.Empty);
+            var split = fileName.Split('.', ' ');
+            var textInfo = new CultureInfo("en-US", false).TextInfo;
+            var builder = new StringBuilder();
+            foreach (var word in split)
             {
-                return;
+                var properCaseWord = textInfo.ToTitleCase(word);
+                var index = fileName.IndexOf(word, StringComparison.OrdinalIgnoreCase) + word.Length;
+                if (extension != word)
+                {
+                    var matches = this.tvShowRegex.Match(properCaseWord);
+                    if (matches.Success)
+                    {
+                        // Found a Tv show season and episode reference. Make sure S and E are upper case.
+                        properCaseWord = string.Format("S{0}E{1}{2}", matches.Groups[1].Value, matches.Groups[2].Value,
+                            matches.Groups[3].Value);
+                    }
+
+                    builder.Append(properCaseWord);
+                    builder.Append(fileName.Substring(index, 1));
+                }
             }
 
-            var newName = this.replaceChars.Aggregate(fileName, (current, c) => current.Replace(c.ToString(), this.replaceWith));
-            if (this.replaceChars.Contains('.'))
-            {
-                var lastIndex = newName.LastIndexOf(this.replaceWith);
-                newName = newName.Substring(0, lastIndex) + "." + newName.Substring(lastIndex + 1);
-            }
-
-            RenameFile(fileName, newName);
+            var newName = string.Format("{0}.{1}", Path.Combine(folderName, builder.ToString().TrimEnd()), extension);
+            RenameFile(file, newName);
         }
 
         private void RenameFile(string oldName, string newName)
         {
             var fileInfo = new FileInfo(oldName);
-            if (!fileInfo.Exists) return;  //Unexpected error, it should have been checked previously.
+            if (!fileInfo.Exists) return; //Unexpected error, it should have been checked previously.
 
-            if (File.Exists(newName))
+            if (File.Exists(newName) && string.Compare(oldName, newName, StringComparison.OrdinalIgnoreCase) != 0)
             {
-                SetError("Unable to rename '{0}' proposed new name '{1}' already exists.", Path.GetFileName(oldName), Path.GetFileName(newName));
+                SetError("Unable to rename '{0}' proposed new name '{1}' already exists.", Path.GetFileName(oldName),
+                    Path.GetFileName(newName));
                 return;
             }
 
@@ -209,6 +238,28 @@ namespace BreesRename
                 Console.WriteLine("{0} --> {1}", fileInfo.FullName, newName);
                 fileInfo.MoveTo(Path.Combine(this.folder, newName));
             }
+        }
+
+        /// <summary>
+        ///     Renames the file by replace characters in the <see cref="replaceChars" /> array with the <see cref="replaceWith" />
+        ///     string.
+        /// </summary>
+        private void ReplaceCharsInFileName(string fileName)
+        {
+            if (!FileMatches(fileName))
+            {
+                return;
+            }
+
+            var newName = this.replaceChars.Aggregate(fileName,
+                (current, c) => current.Replace(c.ToString(), this.replaceWith));
+            if (this.replaceChars.Contains('.'))
+            {
+                var lastIndex = newName.LastIndexOf(this.replaceWith);
+                newName = newName.Substring(0, lastIndex) + "." + newName.Substring(lastIndex + 1);
+            }
+
+            RenameFile(fileName, newName);
         }
 
         private void Run(string[] args)
@@ -234,6 +285,11 @@ namespace BreesRename
                 {
                     ReplaceCharsInFileName(file);
                 }
+
+                if (this.properCase)
+                {
+                    ProperCaseWordsInFileName(file);
+                }
             }
 
             if (this.errors.Length > 0)
@@ -251,8 +307,18 @@ namespace BreesRename
             }
         }
 
+        private void SetError(string s)
+        {
+            this.errors.AppendLine(s);
+        }
+
+        private void SetError(string s, params object[] args)
+        {
+            this.errors.AppendLine(string.Format(s, args));
+        }
+
         /// <summary>
-        /// Truncates the file name at the matched regex.
+        ///     Truncates the file name at the matched regex.
         /// </summary>
         private void TruncateFileNameAtRegex(string fileName)
         {
@@ -265,16 +331,6 @@ namespace BreesRename
             }
         }
 
-        private void SetError(string s)
-        {
-            this.errors.AppendLine(s);
-        }
-
-        private void SetError(string s, params object[] args)
-        {
-            this.errors.AppendLine(string.Format(s, args));
-        }
-        
         public static void Main(string[] args)
         {
             new Program().Run(args);
