@@ -180,9 +180,9 @@ namespace BreesRename
             return true;
         }
 
-        private void ProperCaseWordsInFileName(string file)
+        private string ProperCaseWordsInFileName(string file)
         {
-            if (!this.properCase) return;
+            if (!this.properCase) return file;
             var fileName = Path.GetFileName(file);
             var folderName = Path.GetDirectoryName(file);
             var extension = Path.GetExtension(file);
@@ -215,6 +215,7 @@ namespace BreesRename
 
             var newName = string.Format("{0}.{1}", Path.Combine(folderName, builder.ToString().TrimEnd()), extension);
             RenameFile(file, newName);
+            return newName;
         }
 
         private void RenameFile(string oldName, string newName)
@@ -244,11 +245,11 @@ namespace BreesRename
         ///     Renames the file by replace characters in the <see cref="replaceChars" /> array with the <see cref="replaceWith" />
         ///     string.
         /// </summary>
-        private void ReplaceCharsInFileName(string fileName)
+        private string ReplaceCharsInFileName(string fileName)
         {
             if (!FileMatches(fileName))
             {
-                return;
+                return fileName;
             }
 
             var newName = this.replaceChars.Aggregate(fileName,
@@ -260,6 +261,7 @@ namespace BreesRename
             }
 
             RenameFile(fileName, newName);
+            return newName;
         }
 
         private void Run(string[] args)
@@ -276,19 +278,20 @@ namespace BreesRename
 
             foreach (var file in Directory.GetFiles(this.folder, this.filter))
             {
+                string newFileName = file;
                 if (this.truncateAtRegex != null)
                 {
-                    TruncateFileNameAtRegex(file);
+                    newFileName = TruncateFileNameAtRegex(newFileName);
                 }
 
                 if (this.replaceChars != null)
                 {
-                    ReplaceCharsInFileName(file);
+                    newFileName = ReplaceCharsInFileName(newFileName);
                 }
 
                 if (this.properCase)
                 {
-                    ProperCaseWordsInFileName(file);
+                    newFileName = ProperCaseWordsInFileName(newFileName);
                 }
             }
 
@@ -320,7 +323,7 @@ namespace BreesRename
         /// <summary>
         ///     Truncates the file name at the matched regex.
         /// </summary>
-        private void TruncateFileNameAtRegex(string fileName)
+        private string TruncateFileNameAtRegex(string fileName)
         {
             var match = this.truncateAtRegex.Match(fileName);
             if (match.Success)
@@ -328,7 +331,10 @@ namespace BreesRename
                 var index = match.Index + match.Length;
                 var newName = fileName.Substring(0, index) + Path.GetExtension(fileName);
                 if (newName != fileName) RenameFile(fileName, newName);
+                return newName;
             }
+
+            return fileName;
         }
 
         public static void Main(string[] args)
