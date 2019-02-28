@@ -22,6 +22,7 @@ namespace BreesRename
         private char[] replaceChars;
         private string replaceWith;
         private Regex truncateAtRegex;
+        private Regex removeRegex;
 
         /// <summary>
         ///     Checks to see if the file matches any characters that are to be replaced.
@@ -60,6 +61,13 @@ namespace BreesRename
                 Console.WriteLine("Truncate mode is active");
                 Console.WriteLine("    The following regex will be used to match and truncate after the match.");
                 Console.WriteLine("    " + this.truncateAtRegex);
+            }
+
+            if (this.removeRegex != null)
+            {
+                Console.WriteLine("Remove regex matches mode is active");
+                Console.WriteLine("    The following regex will be used to match and and matched text will be removed.");
+                Console.WriteLine("    " + this.removeRegex);
             }
 
             if (this.properCase)
@@ -127,6 +135,10 @@ namespace BreesRename
                     break;
                 case "/t":
                     this.truncateAtRegex = new Regex(kvp[1], RegexOptions.Singleline);
+                    break;
+
+                case "/x":
+                    this.removeRegex = new Regex(kvp[1], RegexOptions.Singleline);
                     break;
             }
             return true;
@@ -284,6 +296,11 @@ namespace BreesRename
                     newFileName = TruncateFileNameAtRegex(newFileName);
                 }
 
+                if (this.removeRegex != null)
+                {
+                    newFileName = RemovedMatchedText(newFileName);
+                }
+
                 if (this.replaceChars != null)
                 {
                     newFileName = ReplaceCharsInFileName(newFileName);
@@ -330,6 +347,25 @@ namespace BreesRename
             {
                 var index = match.Index + match.Length;
                 var newName = fileName.Substring(0, index) + Path.GetExtension(fileName);
+                if (newName != fileName) RenameFile(fileName, newName);
+                return newName;
+            }
+
+            return fileName;
+        }
+
+        /// <summary>
+        ///     Removes any text matched by the regex.
+        /// </summary>
+        private string RemovedMatchedText(string fileName)
+        {
+            var fileNameWithoutExtension = Path.GetFileNameWithoutExtension(fileName);
+            var extension = Path.GetExtension(fileName);
+            var match = this.removeRegex.Match(fileNameWithoutExtension);
+            if (match.Success)
+            {
+                var newName = this.removeRegex.Replace(fileNameWithoutExtension, string.Empty);
+                newName += extension;
                 if (newName != fileName) RenameFile(fileName, newName);
                 return newName;
             }
